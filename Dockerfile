@@ -6,8 +6,9 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev
 
-# Copy application code
+# Copy application code and public static assets
 COPY src/ ./src/
+COPY public/ ./public/
 
 # Use non-root node user
 USER node

@@ -1,16 +1,26 @@
 const { pool } = require('../config/db');
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 /**
  * Persists a task move with optimistic concurrency control.
  *
  * Transaction flow:
- * 1. BEGIN
- * 2. UPDATE tasks SET column_id = ..., position = ..., version = version + 1
+ * 1. Validate UUIDs
+ * 2. BEGIN
+ * 3. UPDATE tasks SET column_id = ..., position = ..., version = version + 1
  *    WHERE id = $3 AND version = $4
- * 3. If rowCount === 0: ROLLBACK and return null (optimistic lock failure)
- * 4. Otherwise: COMMIT and return updated task row
+ * 4. If rowCount === 0: ROLLBACK and return null (optimistic lock failure)
+ * 5. Otherwise: COMMIT and return updated task row
  */
 async function persistTaskMove({ taskId, columnId, position, version }) {
+  if (!taskId || !UUID_REGEX.test(taskId)) {
+    return null;
+  }
+  if (columnId && !UUID_REGEX.test(columnId)) {
+    return null;
+  }
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -55,6 +65,9 @@ async function persistTaskMove({ taskId, columnId, position, version }) {
 }
 
 async function getTaskById(taskId) {
+  if (!taskId || !UUID_REGEX.test(taskId)) {
+    return null;
+  }
   const res = await pool.query(
     'SELECT id, column_id, title, description, position, version, created_at, updated_at FROM tasks WHERE id = $1',
     [taskId]

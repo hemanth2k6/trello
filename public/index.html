@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Real-Time Collaborative Task Board</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div id="app">
+    <!-- Navigation Bar -->
+    <header class="navbar">
+      <div class="nav-left">
+        <div class="logo">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <rect x="3" y="3" width="18" height="18" rx="3" ry="3"></rect>
+            <rect x="7" y="7" width="3" height="9" rx="1"></rect>
+            <rect x="14" y="7" width="3" height="5" rx="1"></rect>
+          </svg>
+          <span>CollabBoard</span>
+        </div>
+        <div class="board-selector-wrapper">
+          <select id="board-select" aria-label="Select Board">
+            <option value="" disabled selected>Loading boards...</option>
+          </select>
+          <button id="btn-new-board" class="btn btn-primary btn-sm">+ New Board</button>
+        </div>
+      </div>
+      <div class="nav-right">
+        <div id="connection-status" class="status-badge connecting">
+          <span class="status-dot"></span>
+          <span class="status-text">Connecting...</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Board Canvas -->
+    <main class="board-container">
+      <div class="board-header">
+        <h1 id="board-title">Select or Create a Board</h1>
+        <div class="board-actions">
+          <button id="btn-add-column" class="btn btn-secondary">+ Add Column</button>
+        </div>
+      </div>
+
+      <div id="columns-container" class="columns-canvas">
+        <!-- Columns will be dynamically rendered here -->
+      </div>
+    </main>
+  </div>
+
+  <!-- Create Board Modal -->
+  <div id="modal-board" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Create New Board</h3>
+        <button class="modal-close" id="close-modal-board">&times;</button>
+      </div>
+      <form id="form-create-board">
+        <div class="form-group">
+          <label for="board-title-input">Board Title</label>
+          <input type="text" id="board-title-input" placeholder="e.g. Product Roadmap" required autofocus>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" id="cancel-board-btn">Cancel</button>
+          <button type="submit" class="btn btn-primary">Create Board</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Task Detail / Edit Modal -->
+  <div id="modal-task" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Task Details</h3>
+        <button class="modal-close" id="close-modal-task">&times;</button>
+      </div>
+      <form id="form-edit-task">
+        <input type="hidden" id="edit-task-id">
+        <div class="form-group">
+          <label for="edit-task-title">Title</label>
+          <input type="text" id="edit-task-title" required>
+        </div>
+        <div class="form-group">
+          <label for="edit-task-desc">Description</label>
+          <textarea id="edit-task-desc" rows="4" placeholder="Add a detailed description..."></textarea>
+        </div>
+        <div class="task-meta-info" id="edit-task-meta">
+          <!-- Version and timestamps -->
+        </div>
+        <div class="modal-actions space-between">
+          <button type="button" class="btn btn-danger" id="btn-delete-task">Delete Task</button>
+          <div class="right-buttons">
+            <button type="button" class="btn btn-secondary" id="cancel-task-btn">Cancel</button>
+            <button type="submit" class="btn btn-primary">Save Changes</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- Scripts -->
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: trello-realtime-api
+    runtime: node
+    plan: free
+    buildCommand: npm install --omit=dev
+    startCommand: node src/server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: trello-db
+          property: connectionString
+      - key: REDIS_URL
+        sync: false # Set to Upstash or Redis Cloud free-tier connection string
+
+databases:
+  - name: trello-db
+    plan: free
+    databaseName: trello
+    user: trello

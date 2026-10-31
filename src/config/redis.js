@@ -6,10 +6,20 @@ function getRedisConfig() {
     return { socket: { path: process.env.REDIS_SOCKET } };
   }
   if (process.env.REDIS_URL) {
-    if (process.env.REDIS_URL.startsWith('/') || process.env.REDIS_URL.startsWith('unix:')) {
-      return { socket: { path: process.env.REDIS_URL.replace(/^unix:\/\//, '') } };
+    const url = process.env.REDIS_URL;
+    if (url.startsWith('/') || url.startsWith('unix:')) {
+      return { socket: { path: url.replace(/^unix:\/\//, '') } };
     }
-    return { url: process.env.REDIS_URL };
+    if (url.startsWith('rediss://')) {
+      return {
+        url,
+        socket: {
+          tls: true,
+          rejectUnauthorized: false,
+        },
+      };
+    }
+    return { url };
   }
   return { url: 'redis://localhost:6379' };
 }

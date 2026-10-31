@@ -1,14 +1,21 @@
 const { io: Client } = require('socket.io-client');
+const { pool } = require('../src/config/db');
 const { server, start } = require('../src/server');
 const { disconnectRedis } = require('../src/config/redis');
 
 async function runTest() {
   const PORT = 3005;
 
+  // Seed board, column, task
+  const bRes = await pool.query("INSERT INTO boards (title) VALUES ('Phase 3 Board') RETURNING id");
+  const boardId = bRes.rows[0].id;
+  const cRes = await pool.query("INSERT INTO columns (board_id, title, position) VALUES ($1, 'Col 1', 1000) RETURNING id", [boardId]);
+  const columnId = cRes.rows[0].id;
+  const tRes = await pool.query("INSERT INTO tasks (column_id, title, position, version) VALUES ($1, 'Test Task', 1000, 0) RETURNING id", [columnId]);
+  const taskId = tRes.rows[0].id;
+
   await start(PORT);
   console.log(`Test server started on port ${PORT}`);
-
-  const boardId = 'phase3-board-test-uuid';
 
   const client1 = Client(`http://localhost:${PORT}`);
   const client2 = Client(`http://localhost:${PORT}`);
@@ -57,8 +64,8 @@ async function runTest() {
   console.log('Client 1 emitting TASK_MOVED...');
   client1.emit('TASK_MOVED', {
     boardId,
-    taskId: 'task-123',
-    columnId: 'col-456',
+    taskId,
+    columnId,
     position: 2500,
     version: 0,
   });
@@ -70,6 +77,7 @@ async function runTest() {
   client2.disconnect();
   await disconnectRedis();
   server.close();
+  await pool.end();
   process.exit(0);
 }
 
