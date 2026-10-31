@@ -4,6 +4,11 @@ const path = require('path');
 const express = require('express');
 const cors = require('cors');
 
+// Prevent unexpected socket drops from terminating the process
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled Promise Rejection:', reason);
+});
+
 const boardsRouter = require('./routes/boards');
 const columnsRouter = require('./routes/columns');
 const tasksRouter = require('./routes/tasks');
