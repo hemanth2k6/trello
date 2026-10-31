@@ -1,7 +1,7 @@
 const { Server } = require('socket.io');
 const { createAdapter } = require('@socket.io/redis-adapter');
 const { pubClient, subClient } = require('../config/redis');
-const { persistTaskMove } = require('./persistence');
+const { persistTaskMove, getTaskById } = require('./persistence');
 
 function setupSocket(server) {
   const io = new Server(server, {
@@ -28,7 +28,7 @@ function setupSocket(server) {
       }
     });
 
-    // Handle task move event
+    // Handle task move event with optimistic concurrency
     socket.on('TASK_MOVED', async (data) => {
       try {
         const {
@@ -46,6 +46,7 @@ function setupSocket(server) {
         const pos = position !== undefined ? position : targetPosition;
         const ver = version !== undefined ? version : clientVersion;
 
+        // Persist the move using optimistic concurrency check
         const updatedTask = await persistTaskMove({
           taskId,
           columnId: colId,
@@ -53,15 +54,19 @@ function setupSocket(server) {
           version: ver,
         });
 
+        // If version check failed (rowCount === 0), reject ONLY to originating socket
         if (!updatedTask) {
+          const latestTask = await getTaskById(taskId);
           socket.emit('TASK_MOVE_REJECTED', {
             taskId,
             message: 'Conflict: Task version mismatch',
-            latestTask: null,
+            clientVersion: ver,
+            latestTask,
           });
           return;
         }
 
+        // Fire-and-forget broadcast to all clients in the board room
         io.to(`board:${boardId}`).emit('TASK_MOVED', {
           boardId,
           ...updatedTask,
