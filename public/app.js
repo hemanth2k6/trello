@@ -50,7 +50,9 @@
 
   // Socket.io Setup
   function initSocket() {
+    const token = localStorage.getItem('token');
     state.socket = io({
+      auth: { token },
       reconnectionAttempts: 10,
       reconnectionDelay: 1000,
     });
@@ -61,6 +63,13 @@
         state.socket.emit('join_board', state.currentBoardId);
       }
     });
+
+    // Send heartbeat every 30s to maintain presence timestamp in Redis
+    setInterval(() => {
+      if (state.socket && state.socket.connected && state.currentBoardId) {
+        state.socket.emit('heartbeat', { boardId: state.currentBoardId });
+      }
+    }, 30000);
 
     state.socket.on('disconnect', () => {
       updateStatus('disconnected', 'Disconnected');

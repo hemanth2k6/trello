@@ -3,7 +3,7 @@ const { createAdapter } = require('@socket.io/redis-adapter');
 const jwt = require('jsonwebtoken');
 const { JWT_SECRET } = require('../middleware/auth');
 const { pool } = require('../config/db');
-const { pubClient, subClient } = require('../config/redis');
+const { pubClient, subClient, redisClient } = require('../config/redis');
 const { persistTaskMove, getTaskById, recordBoardEvent } = require('./persistence');
 
 function setupSocket(server) {
@@ -38,6 +38,8 @@ function setupSocket(server) {
   });
 
   io.on('connection', (socket) => {
+    socket.boards = new Set();
+
     // Client joins a specific board room after verifying membership
     socket.on('join_board', async (boardId) => {
       try {
@@ -56,6 +58,40 @@ function setupSocket(server) {
         }
 
         socket.join(`board:${boardId}`);
+        socket.boards.add(boardId);
+
+        // Feature 3: Track presence in Redis sorted set
+        const presenceKey = `presence:${boardId}`;
+        let onlineUsers = [];
+        if (redisClient.isOpen) {
+          const now = Date.now();
+          await redisClient.zAdd(presenceKey, [{ score: now, value: userId }]);
+          onlineUsers = await redisClient.zRange(presenceKey, 0, -1);
+        }
+
+        // Emit current online user list to joining socket only
+        socket.emit('online_users', { boardId, users: onlineUsers });
+        socket.emit('presence_current', { boardId, users: onlineUsers });
+
+        // Deliver presence_update of other already-online users to this joining socket
+        for (const existingUserId of onlineUsers) {
+          if (existingUserId !== userId) {
+            socket.emit('presence_update', {
+              boardId,
+              users: onlineUsers,
+              userId: existingUserId,
+              action: 'join',
+            });
+          }
+        }
+
+        // Broadcast presence_update to the room
+        io.to(`board:${boardId}`).emit('presence_update', {
+          boardId,
+          users: onlineUsers,
+          userId,
+          action: 'join',
+        });
       } catch (err) {
         console.error('Error handling join_board:', err);
         socket.emit('error', { message: 'Internal server error', boardId });
@@ -63,9 +99,75 @@ function setupSocket(server) {
     });
 
     // Client leaves a specific board room
-    socket.on('leave_board', (boardId) => {
-      if (boardId) {
+    socket.on('leave_board', async (boardId) => {
+      try {
+        if (!boardId) return;
         socket.leave(`board:${boardId}`);
+        if (socket.boards) {
+          socket.boards.delete(boardId);
+        }
+
+        const userId = socket.user?.id;
+        if (userId && redisClient.isOpen) {
+          const presenceKey = `presence:${boardId}`;
+          await redisClient.zRem(presenceKey, userId);
+          const remainingUsers = await redisClient.zRange(presenceKey, 0, -1);
+          io.to(`board:${boardId}`).emit('presence_update', {
+            boardId,
+            users: remainingUsers,
+            userId,
+            action: 'leave',
+          });
+        }
+      } catch (err) {
+        console.error('Error handling leave_board:', err);
+      }
+    });
+
+    // Heartbeat event from client every 30s to update timestamp in Redis sorted set
+    socket.on('heartbeat', async (data) => {
+      try {
+        const userId = socket.user?.id;
+        if (!userId || !redisClient.isOpen) return;
+
+        const boardId = typeof data === 'string' ? data : data?.boardId;
+        const now = Date.now();
+
+        if (boardId) {
+          await redisClient.zAdd(`presence:${boardId}`, [{ score: now, value: userId }]);
+        } else if (socket.boards && socket.boards.size > 0) {
+          for (const bId of socket.boards) {
+            await redisClient.zAdd(`presence:${bId}`, [{ score: now, value: userId }]);
+          }
+        }
+      } catch (err) {
+        console.error('Error handling heartbeat:', err);
+      }
+    });
+
+    // Handle disconnect to remove user from presence
+    socket.on('disconnecting', async () => {
+      try {
+        const userId = socket.user?.id;
+        if (!userId || !redisClient.isOpen) return;
+
+        const rooms = Array.from(socket.rooms);
+        for (const room of rooms) {
+          if (room.startsWith('board:')) {
+            const boardId = room.replace(/^board:/, '');
+            const presenceKey = `presence:${boardId}`;
+            await redisClient.zRem(presenceKey, userId);
+            const remainingUsers = await redisClient.zRange(presenceKey, 0, -1);
+            socket.to(room).emit('presence_update', {
+              boardId,
+              users: remainingUsers,
+              userId,
+              action: 'leave',
+            });
+          }
+        }
+      } catch (err) {
+        console.error('Error handling disconnect presence:', err);
       }
     });
 
