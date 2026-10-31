@@ -1,9 +1,22 @@
 require('dotenv').config();
 const { createClient } = require('redis');
 
-const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+function getRedisConfig() {
+  if (process.env.REDIS_SOCKET) {
+    return { socket: { path: process.env.REDIS_SOCKET } };
+  }
+  if (process.env.REDIS_URL) {
+    if (process.env.REDIS_URL.startsWith('/') || process.env.REDIS_URL.startsWith('unix:')) {
+      return { socket: { path: process.env.REDIS_URL.replace(/^unix:\/\//, '') } };
+    }
+    return { url: process.env.REDIS_URL };
+  }
+  return { url: 'redis://localhost:6379' };
+}
 
-const pubClient = createClient({ url: redisUrl });
+const clientConfig = getRedisConfig();
+
+const pubClient = createClient(clientConfig);
 const subClient = pubClient.duplicate();
 const redisClient = pubClient.duplicate();
 
@@ -12,11 +25,19 @@ subClient.on('error', (err) => console.error('Redis Sub Client Error:', err));
 redisClient.on('error', (err) => console.error('Redis Client Error:', err));
 
 async function connectRedis() {
-  await Promise.all([
-    pubClient.connect(),
-    subClient.connect(),
-    redisClient.connect(),
-  ]);
+  const promises = [];
+  if (!pubClient.isOpen) promises.push(pubClient.connect());
+  if (!subClient.isOpen) promises.push(subClient.connect());
+  if (!redisClient.isOpen) promises.push(redisClient.connect());
+  await Promise.all(promises);
+}
+
+async function disconnectRedis() {
+  const promises = [];
+  if (pubClient.isOpen) promises.push(pubClient.quit());
+  if (subClient.isOpen) promises.push(subClient.quit());
+  if (redisClient.isOpen) promises.push(redisClient.quit());
+  await Promise.all(promises);
 }
 
 module.exports = {
@@ -24,5 +45,5 @@ module.exports = {
   subClient,
   redisClient,
   connectRedis,
+  disconnectRedis,
 };
-
