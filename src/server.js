@@ -9,6 +9,7 @@ process.on('unhandledRejection', (reason) => {
   console.error('Unhandled Promise Rejection:', reason);
 });
 
+const authRouter = require('./routes/auth');
 const boardsRouter = require('./routes/boards');
 const columnsRouter = require('./routes/columns');
 const tasksRouter = require('./routes/tasks');
@@ -32,6 +33,7 @@ const io = setupSocket(server);
 app.set('io', io);
 
 // API Routes
+app.use('/api/auth', authRouter);
 app.use('/api/boards', boardsRouter);
 app.use('/api/columns', columnsRouter);
 app.use('/api/tasks', tasksRouter);

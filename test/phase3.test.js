@@ -1,4 +1,5 @@
 const { io: Client } = require('socket.io-client');
+const jwt = require('jsonwebtoken');
 const { pool } = require('../src/config/db');
 const { server, start } = require('../src/server');
 const { disconnectRedis } = require('../src/config/redis');
@@ -14,11 +15,20 @@ async function runTest() {
   const tRes = await pool.query("INSERT INTO tasks (column_id, title, position, version) VALUES ($1, 'Test Task', 1000, 0) RETURNING id", [columnId]);
   const taskId = tRes.rows[0].id;
 
+  // Seed user and board membership for JWT auth
+  const uRes = await pool.query(
+    "INSERT INTO users (email, password_hash) VALUES ($1, 'hash') RETURNING id, email",
+    [`phase3_${Date.now()}@test.com`]
+  );
+  const user = uRes.rows[0];
+  const token = jwt.sign({ id: user.id, email: user.email }, process.env.JWT_SECRET || 'super-secret-task-board-jwt-key');
+  await pool.query("INSERT INTO board_members (board_id, user_id, role) VALUES ($1, $2, 'owner')", [boardId, user.id]);
+
   await start(PORT);
   console.log(`Test server started on port ${PORT}`);
 
-  const client1 = Client(`http://localhost:${PORT}`);
-  const client2 = Client(`http://localhost:${PORT}`);
+  const client1 = Client(`http://localhost:${PORT}`, { auth: { token } });
+  const client2 = Client(`http://localhost:${PORT}`, { auth: { token } });
 
   let client1Received = false;
   let client2Received = false;

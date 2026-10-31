@@ -40,10 +40,22 @@ async function runE2ETests() {
   assert.strictEqual(jsRes.status, 200);
   console.log('[PASS] Static assets verified (HTML, CSS, JS served)');
 
-  // 4. Board Creation & Aggregated Fetch
-  const createBoardRes = await fetch(`${baseUrl}/api/boards`, {
+  // 4. Register user & Board Creation & Aggregated Fetch
+  const regRes = await fetch(`${baseUrl}/api/auth/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: `e2e_${Date.now()}@example.com`, password: 'password123' }),
+  });
+  assert.strictEqual(regRes.status, 201);
+  const { token, user } = await regRes.json();
+  console.log('[PASS] Auth registered for E2E user:', user.email);
+
+  const createBoardRes = await fetch(`${baseUrl}/api/boards`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
     body: JSON.stringify({ title: 'Production Roadmap' }),
   });
   assert.strictEqual(createBoardRes.status, 201);
@@ -60,7 +72,9 @@ async function runE2ETests() {
   console.log('[PASS] Boards list contains newly created board');
 
   // Aggregated board fetch
-  const getBoardRes = await fetch(`${baseUrl}/api/boards/${board.id}`);
+  const getBoardRes = await fetch(`${baseUrl}/api/boards/${board.id}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
   assert.strictEqual(getBoardRes.status, 200);
   const boardState = await getBoardRes.json();
   assert.strictEqual(boardState.board_id, board.id);
@@ -73,8 +87,8 @@ async function runE2ETests() {
   const col2 = boardState.columns[1];
 
   // 5. Connect 2 Socket.io clients
-  const client1 = Client(baseUrl);
-  const client2 = Client(baseUrl);
+  const client1 = Client(baseUrl, { auth: { token } });
+  const client2 = Client(baseUrl, { auth: { token } });
 
   await Promise.all([
     new Promise((resolve) => client1.on('connect', resolve)),

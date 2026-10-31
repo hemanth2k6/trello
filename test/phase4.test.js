@@ -1,4 +1,5 @@
 const { io: Client } = require('socket.io-client');
+const jwt = require('jsonwebtoken');
 const { pool } = require('../src/config/db');
 const { server, start } = require('../src/server');
 const { disconnectRedis } = require('../src/config/redis');
@@ -14,6 +15,15 @@ async function runTest() {
   // Seed board, column, task
   const boardRes = await pool.query("INSERT INTO boards (title) VALUES ('Phase 4 Board') RETURNING id");
   const boardId = boardRes.rows[0].id;
+
+  // Seed user and membership
+  const uRes = await pool.query(
+    "INSERT INTO users (email, password_hash) VALUES ($1, 'hash') RETURNING id, email",
+    [`phase4_${Date.now()}@test.com`]
+  );
+  const user = uRes.rows[0];
+  const token = jwt.sign({ id: user.id, email: user.email }, process.env.JWT_SECRET || 'super-secret-task-board-jwt-key');
+  await pool.query("INSERT INTO board_members (board_id, user_id, role) VALUES ($1, $2, 'owner')", [boardId, user.id]);
 
   const colRes = await pool.query(
     "INSERT INTO columns (board_id, title, position) VALUES ($1, 'Column 1', 1000), ($1, 'Column 2', 2000) RETURNING id",
@@ -32,8 +42,8 @@ async function runTest() {
   await start(PORT);
   console.log(`Server listening on port ${PORT}`);
 
-  const client1 = Client(`http://localhost:${PORT}`);
-  const client2 = Client(`http://localhost:${PORT}`);
+  const client1 = Client(`http://localhost:${PORT}`, { auth: { token } });
+  const client2 = Client(`http://localhost:${PORT}`, { auth: { token } });
 
   await Promise.all([
     new Promise((resolve) => client1.on('connect', resolve)),

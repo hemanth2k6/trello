@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../config/db');
+const { authenticateToken, optionalAuth } = require('../middleware/auth');
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -26,7 +27,7 @@ router.get('/', async (req, res) => {
 });
 
 // POST /api/boards - Create a new board
-router.post('/', async (req, res) => {
+router.post('/', optionalAuth, async (req, res) => {
   try {
     const { title } = req.body;
     if (!title || typeof title !== 'string' || !title.trim()) {
@@ -38,8 +39,9 @@ router.post('/', async (req, res) => {
       [title.trim()]
     );
 
-    // Create default columns for convenience: "To Do", "In Progress", "Done"
     const boardId = result.rows[0].id;
+
+    // Create default columns for convenience: "To Do", "In Progress", "Done"
     await db.query(
       `INSERT INTO columns (board_id, title, position) VALUES
        ($1, 'To Do', 1000),
@@ -48,6 +50,15 @@ router.post('/', async (req, res) => {
       [boardId]
     );
 
+    // If authenticated user created the board, make them owner
+    if (req.user && req.user.id) {
+      await db.query(
+        `INSERT INTO board_members (board_id, user_id, role) VALUES ($1, $2, 'owner')
+         ON CONFLICT (board_id, user_id) DO NOTHING`,
+        [boardId, req.user.id]
+      );
+    }
+
     return res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error('Error creating board:', err);
@@ -55,13 +66,29 @@ router.post('/', async (req, res) => {
   }
 });
 
-// GET /api/boards/:boardId - Returns aggregated board state with columns and tasks
-router.get('/:boardId', async (req, res) => {
+// GET /api/boards/:boardId - Returns aggregated board state with columns and tasks (members only)
+router.get('/:boardId', authenticateToken, async (req, res) => {
   try {
     const { boardId } = req.params;
 
     if (!UUID_REGEX.test(boardId)) {
       return res.status(400).json({ error: 'Invalid board UUID format' });
+    }
+
+    // Check board existence
+    const bCheck = await db.query('SELECT id FROM boards WHERE id = $1', [boardId]);
+    if (bCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Board not found' });
+    }
+
+    // Check board membership
+    const memberCheck = await db.query(
+      'SELECT role FROM board_members WHERE board_id = $1 AND user_id = $2',
+      [boardId, req.user.id]
+    );
+
+    if (memberCheck.rows.length === 0) {
+      return res.status(403).json({ error: 'Access denied: not a board member' });
     }
 
     const query = `
@@ -106,13 +133,57 @@ router.get('/:boardId', async (req, res) => {
 
     const result = await db.query(query, [boardId]);
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Board not found' });
-    }
-
     return res.json(result.rows[0]);
   } catch (err) {
     console.error('Error fetching board:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/boards/:boardId/members - Add a user to a board
+router.post('/:boardId/members', authenticateToken, async (req, res) => {
+  try {
+    const { boardId } = req.params;
+    const { userId, email, role = 'member' } = req.body || {};
+
+    if (!UUID_REGEX.test(boardId)) {
+      return res.status(400).json({ error: 'Invalid board UUID format' });
+    }
+
+    // Verify requester is a board member
+    const reqMember = await db.query(
+      'SELECT role FROM board_members WHERE board_id = $1 AND user_id = $2',
+      [boardId, req.user.id]
+    );
+    if (reqMember.rows.length === 0) {
+      return res.status(403).json({ error: 'Access denied: not a board member' });
+    }
+
+    let targetUserId = userId;
+    if (!targetUserId && email) {
+      const uRes = await db.query('SELECT id FROM users WHERE email = $1', [email.trim().toLowerCase()]);
+      if (uRes.rows.length === 0) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+      targetUserId = uRes.rows[0].id;
+    }
+
+    if (!targetUserId || !UUID_REGEX.test(targetUserId)) {
+      return res.status(400).json({ error: 'Valid userId or email is required' });
+    }
+
+    const validRole = role === 'owner' ? 'owner' : 'member';
+    const insRes = await db.query(
+      `INSERT INTO board_members (board_id, user_id, role)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (board_id, user_id) DO UPDATE SET role = EXCLUDED.role
+       RETURNING board_id, user_id, role, created_at`,
+      [boardId, targetUserId, validRole]
+    );
+
+    return res.status(201).json(insRes.rows[0]);
+  } catch (err) {
+    console.error('Error adding board member:', err);
     return res.status(500).json({ error: 'Internal server error' });
   }
 });

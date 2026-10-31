@@ -75,7 +75,26 @@ async function getTaskById(taskId) {
   return res.rows[0] || null;
 }
 
+async function recordBoardEvent({ boardId, eventType, payload, actorUserId }) {
+  if (!boardId || !UUID_REGEX.test(boardId)) {
+    return null;
+  }
+  const query = `
+    INSERT INTO board_events (board_id, event_type, payload, actor_user_id)
+    VALUES ($1, $2, $3, $4)
+    RETURNING id, board_id, event_type, payload, actor_user_id, created_at;
+  `;
+  const res = await pool.query(query, [
+    boardId,
+    eventType,
+    JSON.stringify(payload),
+    actorUserId && UUID_REGEX.test(actorUserId) ? actorUserId : null,
+  ]);
+  return res.rows[0];
+}
+
 module.exports = {
   persistTaskMove,
   getTaskById,
+  recordBoardEvent,
 };
