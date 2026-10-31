@@ -188,6 +188,40 @@ router.post('/:boardId/members', authenticateToken, async (req, res) => {
   }
 });
 
+// GET /api/boards/:boardId/events - Returns activity event log (member-only)
+router.get('/:boardId/events', authenticateToken, async (req, res) => {
+  try {
+    const { boardId } = req.params;
+    const limit = Math.min(Math.max(parseInt(req.query.limit || '50', 10), 1), 100);
+
+    if (!UUID_REGEX.test(boardId)) {
+      return res.status(400).json({ error: 'Invalid board UUID format' });
+    }
+
+    // Verify requester is a board member
+    const reqMember = await db.query(
+      'SELECT role FROM board_members WHERE board_id = $1 AND user_id = $2',
+      [boardId, req.user.id]
+    );
+    if (reqMember.rows.length === 0) {
+      return res.status(403).json({ error: 'Access denied: not a board member' });
+    }
+
+    const query = `
+      SELECT id, board_id, event_type, payload, actor_user_id, created_at
+      FROM board_events
+      WHERE board_id = $1
+      ORDER BY created_at DESC
+      LIMIT $2;
+    `;
+    const result = await db.query(query, [boardId, limit]);
+    return res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching board events:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // POST /api/boards/:boardId/columns - Add a column to a board
 router.post('/:boardId/columns', async (req, res) => {
   try {
