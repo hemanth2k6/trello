@@ -100,17 +100,48 @@ RETURNING id, column_id, title, description, position, version, created_at, upda
 
 ## 4. Real-Time Event Contracts
 
-### 1. `join_board`
+### 1. Connection Authentication
+Clients must authenticate when connecting by providing a JWT in the connection handshake.
+- **Authentication**: `socket.handshake.auth.token` (or `Authorization: Bearer <token>` header)
+- **Error Behavior**: Connections with missing or invalid tokens are immediately rejected with an `Authentication error` connect error.
+
+### 2. `join_board`
 Client joins a board's broadcast channel.
 - **Direction**: Client $\to$ Server
 - **Payload**: `boardId` (UUID string)
+- **Membership Check**: The authenticated user must be a member or owner of the board in `board_members`. If not, an `error` / `join_board_error` event is emitted to the socket and the room is not joined.
+- **Initial Presence Sync**: Server emits the current online user list directly to the joining socket (`online_users` / `presence_current`).
+- **Presence Broadcast**: Server broadcasts a `presence_update` to the room announcing the new user.
 
-### 2. `leave_board`
+### 3. `leave_board`
 Client leaves a board's broadcast channel.
 - **Direction**: Client $\to$ Server
 - **Payload**: `boardId` (UUID string)
+- **Presence Broadcast**: Server removes the user from the Redis presence sorted set and broadcasts `presence_update` (`action: "leave"`).
 
-### 3. `TASK_MOVED`
+### 4. `heartbeat`
+Client sends periodic heartbeats (every 30 seconds) while active on a board.
+- **Direction**: Client $\to$ Server
+- **Payload**: `{ "boardId": "c3789a74-d47f-47ea-a2f0-7b56191f63a1" }` (or boardId string)
+- **Server Behavior**: Updates the member's score in Redis sorted set `presence:{boardId}` to the current timestamp.
+
+### 5. `presence_update` (Broadcast)
+Broadcasted to the board room when a user joins or leaves.
+- **Direction**: Server $\to$ Room (`board:{boardId}`)
+- **Payload**:
+  ```json
+  {
+    "boardId": "c3789a74-d47f-47ea-a2f0-7b56191f63a1",
+    "users": [
+      "d9c386f0-a7d8-4889-93ee-5f72578b4c67",
+      "2a47fa61-c906-4ed7-8d09-1892476bac76"
+    ],
+    "userId": "2a47fa61-c906-4ed7-8d09-1892476bac76",
+    "action": "join"
+  }
+  ```
+
+### 6. `TASK_MOVED`
 Client requests a task position or column update.
 - **Direction**: Client $\to$ Server
 - **Payload**:
@@ -124,8 +155,8 @@ Client requests a task position or column update.
   }
   ```
 
-### 4. `TASK_MOVED` (Broadcast)
-Broadcasted to all clients in `board:{boardId}` room after successful persistence.
+### 7. `TASK_MOVED` (Broadcast)
+Broadcasted to all clients in `board:{boardId}` room after successful persistence. Also records an entry in `board_events`.
 - **Direction**: Server $\to$ Room (`board:{boardId}`)
 - **Payload**:
   ```json
@@ -137,11 +168,12 @@ Broadcasted to all clients in `board:{boardId}` room after successful persistenc
     "description": "Implement JWT",
     "position": 2500,
     "version": 1,
-    "updated_at": "2026-10-31T06:12:46.416Z"
+    "updated_at": "2026-10-31T06:12:46.416Z",
+    "moved_by": "d9c386f0-a7d8-4889-93ee-5f72578b4c67"
   }
   ```
 
-### 5. `TASK_MOVE_REJECTED`
+### 8. `TASK_MOVE_REJECTED`
 Sent **only** to the socket that initiated an out-of-date mutation.
 - **Direction**: Server $\to$ Originating Socket
 - **Payload**:
@@ -164,64 +196,129 @@ Sent **only** to the socket that initiated an out-of-date mutation.
 
 ---
 
-## 5. REST API Reference
+## 5. Architectural Note: Why Event Logs Are Separate From Real-Time Broadcasts
 
-### Initial Board State Aggregation
+A key design choice in this architecture is the deliberate separation between **real-time WebSocket broadcasts** and the **durable `board_events` activity log**.
+
+1. **Ephemeral vs. Durable Delivery**:
+   - **Real-Time Broadcasts**: Designed for zero-latency in-memory fan-out via Redis Pub/Sub directly to active WebSocket sessions. If a user is offline, experiencing network stutter, or navigating pages, in-flight WebSocket packets are dropped.
+   - **Event Log (`board_events`)**: Stored durably in PostgreSQL with JSONB payloads, actor IDs, and immutable timestamps. It serves as an authoritative source of truth regardless of whether any client was connected at the instant of the event.
+
+2. **Audit Trails & Activity Feeds**:
+   - Business requirements (such as auditing, activity streams, compliance, and user accountability) demand historical querying and pagination (`GET /api/boards/:boardId/events?limit=50`). Broadcast channels cannot support historical querying without overloading the transient Pub/Sub tier.
+
+3. **Offline Catch-Up & Reconnection Synchronization**:
+   - When a client reconnects after an outage, fetching recent board events allows it to compute delta changes or display activity summaries without requiring a full re-render of the entire database state.
+
+4. **Decoupled Performance**:
+   - Persisting an event log entry in PostgreSQL runs as part of the write pipeline. Decoupling it from Socket.io broadcast dispatch ensures that client UI synchronization remains instantaneous and fire-and-forget, while event logging provides durability without slowing down the real-time event loop.
+
+---
+
+## 6. REST API Reference
+
+### Authentication
+
+#### Register User
 ```http
-GET /api/boards/:boardId
-```
-Fetches the entire board, including nested columns and tasks, in a single SQL query using `json_agg` / `json_build_object`.
-
-#### Response: `200 OK`
-```json
-{
-  "board_id": "43a2cf95-5ac0-4081-b042-f397b55429d8",
-  "board_title": "Sprint Board",
-  "columns": [
-    {
-      "id": "62d359c7-178f-4a22-8359-f353955ead7a",
-      "title": "To Do",
-      "position": 1000,
-      "tasks": [
-        {
-          "id": "79bf0806-4484-4658-8be1-5f8732b89eb6",
-          "title": "Setup Auth",
-          "description": "Implement JWT",
-          "position": 1000,
-          "version": 0,
-          "created_at": "2026-10-31T06:05:22.687Z",
-          "updated_at": "2026-10-31T06:05:22.687Z"
-        }
-      ]
-    },
-    {
-      "id": "fc5d57a5-2453-4927-8fc3-4888dcebd4d6",
-      "title": "Done",
-      "position": 2000,
-      "tasks": []
-    }
-  ]
-}
-```
-
-### Create Board
-```http
-POST /api/boards
+POST /api/auth/register
 Content-Type: application/json
 
 {
-  "title": "Sprint Board"
+  "email": "user@example.com",
+  "password": "password123"
+}
+```
+**Response (`201 Created`)**:
+```json
+{
+  "token": "<jwt-token>",
+  "user": {
+    "id": "d9c386f0-a7d8-4889-93ee-5f72578b4c67",
+    "email": "user@example.com",
+    "created_at": "2026-10-31T17:00:00.000Z"
+  }
 }
 ```
 
-### Health Check
+#### Login User
 ```http
-GET /health
+POST /api/auth/login
+Content-Type: application/json
+
+{
+  "email": "user@example.com",
+  "password": "password123"
+}
+```
+**Response (`200 OK`)**:
+```json
+{
+  "token": "<jwt-token>",
+  "user": {
+    "id": "d9c386f0-a7d8-4889-93ee-5f72578b4c67",
+    "email": "user@example.com",
+    "created_at": "2026-10-31T17:00:00.000Z"
+  }
+}
 ```
 
 ---
 
-## 6. How to Run & Deploy (Free Tier)
+### Boards & Membership
+
+#### Get Board State (Protected, Board Members Only)
+```http
+GET /api/boards/:boardId
+Authorization: Bearer <jwt-token>
+```
+- Returns 401 if unauthenticated.
+- Returns 403 if authenticated user is not a board member.
+- Returns 200 with aggregated board state if authorized.
+
+#### Add Board Member
+```http
+POST /api/boards/:boardId/members
+Authorization: Bearer <jwt-token>
+Content-Type: application/json
+
+{
+  "userId": "2a47fa61-c906-4ed7-8d09-1892476bac76",
+  "role": "member"
+}
+```
+
+#### Get Board Activity Events (Protected, Board Members Only)
+```http
+GET /api/boards/:boardId/events?limit=50
+Authorization: Bearer <jwt-token>
+```
+Returns the most recent events for the board ordered by `created_at DESC`.
+
+**Response (`200 OK`)**:
+```json
+[
+  {
+    "id": "b3e34bca-901a-4bc4-9382-720ad901a141",
+    "board_id": "c3789a74-d47f-47ea-a2f0-7b56191f63a1",
+    "event_type": "TASK_MOVED",
+    "payload": {
+      "boardId": "c3789a74-d47f-47ea-a2f0-7b56191f63a1",
+      "id": "79bf0806-4484-4658-8be1-5f8732b89eb6",
+      "column_id": "fc5d57a5-2453-4927-8fc3-4888dcebd4d6",
+      "position": 2500,
+      "version": 1,
+      "moved_by": "d9c386f0-a7d8-4889-93ee-5f72578b4c67"
+    },
+    "actor_user_id": "d9c386f0-a7d8-4889-93ee-5f72578b4c67",
+    "created_at": "2026-10-31T17:15:00.000Z"
+  }
+]
+```
+
+---
+
+## 7. How to Run & Deploy (Free Tier)
 
 ### Free-Tier Deployment (Render + Upstash)
 
@@ -251,10 +348,6 @@ This repository includes a ready-to-deploy [`render.yaml`](render.yaml) Blueprin
 ```bash
 docker compose up --build
 ```
-To run multiple scaled API instances:
-```bash
-docker compose up --build --scale api=3
-```
 
 #### Option 2: Running Locally
 1. **Install Dependencies**:
@@ -266,23 +359,28 @@ docker compose up --build --scale api=3
    PORT=3000
    DATABASE_URL=postgres://postgres:postgres@localhost:5432/trello
    REDIS_URL=redis://localhost:6379
+   JWT_SECRET=super-secret-task-board-jwt-key
    ```
 3. **Start Application**:
    ```bash
    npm start
    ```
-4. Open `http://localhost:3000` in your browser.
 
 ---
 
-## 7. Testing
+## 8. Testing
 
-Automated phase test suites test the critical architectural contracts:
+Run all automated test suites covering JWT authentication, board membership authorization, OCC collision handling, event logs, and Redis presence:
 
 ```bash
-# Test WebSocket cross-client broadcast over Redis adapter
-node test/phase3.test.js
+# Run all acceptance tests
+npm test
 
-# Test concurrent task move optimistic lock collision handling
-node test/phase4.test.js
+# Run individual acceptance tests:
+node test/feature1.test.js  # Feature 1: JWT Auth & Board Membership
+node test/feature2.test.js  # Feature 2: Event Log & Activity API
+node test/feature3.test.js  # Feature 3: Online Presence in Redis
+node test/phase3.test.js    # Multi-client WebSocket broadcast
+node test/phase4.test.js    # Concurrency control conflict rejection
+node test/e2e.test.js       # End-to-end integration test
 ```
