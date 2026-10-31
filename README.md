@@ -221,43 +221,57 @@ GET /health
 
 ---
 
-## 6. How to Run
+## 6. How to Run & Deploy (Free Tier)
 
-### Option 1: One-Command Startup with Docker Compose
-To build and spin up the complete infrastructure (PostgreSQL 16, Redis 7, Node.js API):
+### Free-Tier Deployment (Render + Upstash)
 
+This repository includes a ready-to-deploy [`render.yaml`](render.yaml) Blueprint configuration:
+
+1. **Create Free Redis on Upstash**:
+   - Sign in at [console.upstash.com](https://console.upstash.com) with GitHub.
+   - Click **Create Database**, name it `trello-redis`, and choose a primary region.
+   - In the database dashboard, copy the `rediss://...` connection string.
+
+2. **Deploy on Render via Blueprint**:
+   - Sign in at [dashboard.render.com](https://dashboard.render.com) with GitHub.
+   - Click **New +** $\to$ **Blueprint**.
+   - Select your `trello` repository.
+   - Render automatically provisions:
+     - `trello-db` (Free PostgreSQL instance)
+     - `trello-realtime-api` (Free Node.js Web Service)
+   - When prompted for `REDIS_URL`, paste your Upstash connection string (`rediss://...`).
+   - Click **Apply**.
+   - The app automatically creates the database schema on first boot and serves the interactive frontend at your Render URL!
+
+---
+
+### Local Development Startup
+
+#### Option 1: Docker Compose (All Services)
 ```bash
 docker compose up --build
 ```
-
-To run multiple API instances with Docker Compose port allocation:
+To run multiple scaled API instances:
 ```bash
 docker compose up --build --scale api=3
 ```
 
-### Option 2: Running Locally for Development
-
+#### Option 2: Running Locally
 1. **Install Dependencies**:
    ```bash
    npm install
    ```
-
 2. **Configure Environment (`.env`)**:
    ```env
    PORT=3000
    DATABASE_URL=postgres://postgres:postgres@localhost:5432/trello
    REDIS_URL=redis://localhost:6379
    ```
-
-3. **Initialize Database Schema**:
-   ```bash
-   psql -U postgres -d trello -f src/models/schema.sql
-   ```
-
-4. **Start Application**:
+3. **Start Application**:
    ```bash
    npm start
    ```
+4. Open `http://localhost:3000` in your browser.
 
 ---
 
