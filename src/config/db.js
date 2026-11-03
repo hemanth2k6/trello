@@ -44,15 +44,23 @@ pool.on('error', (err) => {
   console.error('Unexpected error on idle database client', err);
 });
 
-async function initSchema() {
-  try {
-    const schemaPath = path.join(__dirname, '../models/schema.sql');
-    const sql = fs.readFileSync(schemaPath, 'utf8');
-    await pool.query(sql);
-    console.log('Database schema verified/initialized.');
-  } catch (err) {
-    console.error('Failed to initialize database schema:', err);
-    throw err;
+async function initSchema(maxRetries = 5) {
+  const schemaPath = path.join(__dirname, '../models/schema.sql');
+  const sql = fs.readFileSync(schemaPath, 'utf8');
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      await pool.query(sql);
+      console.log('Database schema verified/initialized.');
+      return;
+    } catch (err) {
+      if (attempt === maxRetries) {
+        console.error('Failed to initialize database schema after retries:', err);
+        throw err;
+      }
+      console.warn(`Database connection attempt ${attempt} failed (${err.message || err.code}). Retrying in 1.5s...`);
+      await new Promise((r) => setTimeout(r, 1500));
+    }
   }
 }
 
