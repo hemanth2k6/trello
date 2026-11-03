@@ -6,11 +6,15 @@ const { disconnectRedis } = require('../src/config/redis');
 
 async function runTest() {
   const PORT = 3006;
-  process.env.PGHOST = '/tmp';
-  process.env.PGPORT = '5433';
-  process.env.PGDATABASE = 'trello';
-  process.env.PGUSER = 'postgres';
-  process.env.REDIS_SOCKET = '/tmp/redis.sock';
+  if (!process.env.DATABASE_URL) {
+    process.env.PGHOST = '/tmp';
+    process.env.PGPORT = '5433';
+    process.env.PGDATABASE = 'trello';
+    process.env.PGUSER = 'postgres';
+  }
+  if (!process.env.REDIS_URL) {
+    process.env.REDIS_SOCKET = '/tmp/redis.sock';
+  }
 
   // Seed board, column, task
   const boardRes = await pool.query("INSERT INTO boards (title) VALUES ('Phase 4 Board') RETURNING id");
@@ -100,8 +104,8 @@ async function runTest() {
     version: 0,
   });
 
-  // Wait for events to process
-  await new Promise((resolve) => setTimeout(resolve, 1500));
+  // Wait for events to process (allow time for cloud database latency)
+  await new Promise((resolve) => setTimeout(resolve, 4000));
 
   console.log(`Results: rejectsReceived=${rejectsReceived}, movesReceived=${movesReceived}`);
 

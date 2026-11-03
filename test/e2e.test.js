@@ -8,11 +8,15 @@ async function runE2ETests() {
   console.log('--- STARTING COMPREHENSIVE E2E VERIFICATION ---');
 
   const PORT = 3010;
-  process.env.PGHOST = '/tmp';
-  process.env.PGPORT = '5434';
-  process.env.PGDATABASE = 'trello';
-  process.env.PGUSER = 'postgres';
-  process.env.REDIS_SOCKET = '/tmp/redis.sock';
+  if (!process.env.DATABASE_URL) {
+    process.env.PGHOST = '/tmp';
+    process.env.PGPORT = '5434';
+    process.env.PGDATABASE = 'trello';
+    process.env.PGUSER = 'postgres';
+  }
+  if (!process.env.REDIS_URL) {
+    process.env.REDIS_SOCKET = '/tmp/redis.sock';
+  }
 
   // 1. Boot server (automatically initializes schema & connects Redis)
   await start(PORT);

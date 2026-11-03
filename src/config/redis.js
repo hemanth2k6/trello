@@ -31,6 +31,8 @@ function getRedisConfig() {
       socket: {
         tls: true,
         rejectUnauthorized: false,
+        family: 4,
+        connectTimeout: 15000,
         reconnectStrategy,
       },
     };
@@ -39,6 +41,8 @@ function getRedisConfig() {
   return {
     url: formattedUrl,
     socket: {
+      family: 4,
+      connectTimeout: 15000,
       reconnectStrategy,
     },
   };
@@ -78,19 +82,24 @@ subClient.subscribe = (...args) => {
 async function connectRedis() {
   const connectClient = async (client, name) => {
     if (client.isOpen) return;
-    try {
-      await client.connect();
-      console.log(`Redis ${name} connected successfully.`);
-    } catch (err) {
-      console.error(`Failed to connect Redis ${name}:`, err.message || err);
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        await client.connect();
+        console.log(`Redis ${name} connected successfully.`);
+        return;
+      } catch (err) {
+        if (attempt === 3) {
+          console.error(`Failed to connect Redis ${name}:`, err.message || err);
+        } else {
+          await new Promise((r) => setTimeout(r, 500));
+        }
+      }
     }
   };
 
-  await Promise.all([
-    connectClient(pubClient, 'Pub Client'),
-    connectClient(subClient, 'Sub Client'),
-    connectClient(redisClient, 'Client'),
-  ]);
+  await connectClient(pubClient, 'Pub Client');
+  await connectClient(subClient, 'Sub Client');
+  await connectClient(redisClient, 'Client');
 }
 
 async function disconnectRedis() {

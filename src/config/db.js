@@ -1,7 +1,17 @@
 require('dotenv').config();
 const fs = require('fs');
+const net = require('net');
 const path = require('path');
 const { Pool } = require('pg');
+
+class Ipv4Socket extends net.Socket {
+  connect(...args) {
+    if (typeof args[0] === 'number') {
+      return super.connect({ port: args[0], host: args[1], family: 4 });
+    }
+    return super.connect(...args);
+  }
+}
 
 function getPoolConfig() {
   if (process.env.DATABASE_URL) {
@@ -13,6 +23,7 @@ function getPoolConfig() {
     return {
       connectionString: process.env.DATABASE_URL,
       ssl: isLocal ? false : { rejectUnauthorized: false },
+      stream: () => new Ipv4Socket(),
     };
   }
 
@@ -23,6 +34,7 @@ function getPoolConfig() {
     password: process.env.PGPASSWORD || 'postgres',
     database: process.env.PGDATABASE || 'trello',
     ssl: process.env.PGSSL === 'true' ? { rejectUnauthorized: false } : false,
+    stream: () => new Ipv4Socket(),
   };
 }
 
