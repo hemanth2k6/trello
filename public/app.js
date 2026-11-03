@@ -12,6 +12,7 @@
     draggedFromColId: null,
     authMode: 'login', // 'login' | 'register'
     onlineUsers: new Set(),
+    filterQuery: '',
   };
 
   // DOM Elements
@@ -21,10 +22,14 @@
     btnAddColumn: document.getElementById('btn-add-column'),
     btnInviteMember: document.getElementById('btn-invite-member'),
     boardTitle: document.getElementById('board-title'),
+    boardStats: document.getElementById('board-stats'),
+    filterCards: document.getElementById('filter-cards'),
     columnsContainer: document.getElementById('columns-container'),
     statusBadge: document.getElementById('connection-status'),
-    presenceBadge: document.getElementById('presence-badge'),
+    presenceWidget: document.getElementById('presence-widget'),
+    avatarStack: document.getElementById('avatar-stack'),
     presenceCount: document.getElementById('presence-count'),
+    userAvatar: document.getElementById('user-avatar'),
     userDisplay: document.getElementById('user-display'),
     btnAuthToggle: document.getElementById('btn-auth-toggle'),
     // Modals
@@ -52,6 +57,7 @@
     cancelInviteBtn: document.getElementById('cancel-invite-btn'),
     // Task Modal
     modalTask: document.getElementById('modal-task'),
+    taskDialogId: document.getElementById('task-dialog-id'),
     formEditTask: document.getElementById('form-edit-task'),
     editTaskId: document.getElementById('edit-task-id'),
     editTaskTitle: document.getElementById('edit-task-title'),
@@ -71,8 +77,9 @@
     el.toastContainer.appendChild(toast);
     setTimeout(() => {
       toast.style.opacity = '0';
-      toast.style.transition = 'opacity 0.3s ease';
-      setTimeout(() => toast.remove(), 300);
+      toast.style.transform = 'translateY(8px)';
+      toast.style.transition = 'opacity 0.25s ease, transform 0.25s ease';
+      setTimeout(() => toast.remove(), 250);
     }, 4000);
   }
 
@@ -97,27 +104,82 @@
 
   // Status Badge Updater
   function updateStatus(status, text) {
-    el.statusBadge.className = `status-badge ${status}`;
+    el.statusBadge.className = `status-pill ${status}`;
     el.statusBadge.querySelector('.status-text').textContent = text;
   }
 
   // Update User UI
   function updateUserUI() {
     if (state.token && state.user) {
-      el.userDisplay.textContent = state.user.email;
-      el.userDisplay.title = `Signed in as ${state.user.email}`;
+      const email = state.user.email || 'User';
+      const initial = email.charAt(0).toUpperCase();
+      el.userAvatar.textContent = initial;
+      el.userDisplay.textContent = email;
+      el.userDisplay.title = `Signed in as ${email}`;
       el.btnAuthToggle.textContent = 'Sign Out';
     } else {
+      el.userAvatar.textContent = 'G';
       el.userDisplay.textContent = 'Guest';
       el.userDisplay.title = 'Not signed in';
       el.btnAuthToggle.textContent = 'Sign In';
     }
   }
 
-  // Update Presence Badge
+  // Update Presence Avatars
   function updatePresenceUI(count) {
     const online = count || state.onlineUsers.size || 1;
     el.presenceCount.textContent = `${online} online`;
+
+    // Render avatar circles
+    el.avatarStack.innerHTML = '';
+    const userArray = Array.from(state.onlineUsers);
+    const displayCount = Math.min(userArray.length || 1, 4);
+
+    const colors = [
+      'linear-gradient(135deg, #6366f1, #a855f7)',
+      'linear-gradient(135deg, #3b82f6, #06b6d4)',
+      'linear-gradient(135deg, #10b981, #84cc16)',
+      'linear-gradient(135deg, #f59e0b, #ef4444)',
+    ];
+
+    for (let i = 0; i < displayCount; i++) {
+      const avatar = document.createElement('div');
+      avatar.className = 'avatar-stack-item';
+      avatar.style.background = colors[i % colors.length];
+      const letter = String.fromCharCode(65 + (i * 7) % 26);
+      avatar.textContent = letter;
+      el.avatarStack.appendChild(avatar);
+    }
+  }
+
+  // Format Timestamps
+  function formatRelativeTime(dateString) {
+    if (!dateString) return 'recently';
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffSec = Math.floor((now - date) / 1000);
+    if (diffSec < 60) return 'just now';
+    if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
+    if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`;
+    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  }
+
+  // Column Status Dot Color Helper
+  function getColumnColor(title) {
+    const lower = (title || '').toLowerCase();
+    if (lower.includes('progress') || lower.includes('doing') || lower.includes('review')) {
+      return '#6366f1'; // Indigo
+    }
+    if (lower.includes('done') || lower.includes('completed') || lower.includes('closed')) {
+      return '#10b981'; // Emerald
+    }
+    if (lower.includes('todo') || lower.includes('to do') || lower.includes('plan')) {
+      return '#f59e0b'; // Amber
+    }
+    if (lower.includes('backlog') || lower.includes('ideas')) {
+      return '#8b5cf6'; // Purple
+    }
+    return '#64748b'; // Slate
   }
 
   // Socket.io Setup
@@ -131,7 +193,7 @@
       state.socket.disconnect();
     }
 
-    updateStatus('connecting', 'Connecting...');
+    updateStatus('connecting', 'Connecting');
 
     state.socket = io({
       auth: { token: state.token },
@@ -147,14 +209,14 @@
       }
     });
 
-    // Send heartbeat every 30s to maintain presence timestamp in Redis
+    // Heartbeat every 30s
     setInterval(() => {
       if (state.socket && state.socket.connected && state.currentBoardId) {
         state.socket.emit('heartbeat', { boardId: state.currentBoardId });
       }
     }, 30000);
 
-    state.socket.on('disconnect', (reason) => {
+    state.socket.on('disconnect', () => {
       updateStatus('disconnected', 'Disconnected');
     });
 
@@ -165,7 +227,7 @@
         logoutUser();
         openAuthModal();
       } else {
-        updateStatus('connecting', 'Reconnecting...');
+        updateStatus('connecting', 'Reconnecting');
       }
     });
 
@@ -197,7 +259,7 @@
       }
     });
 
-    // Real-Time Task & Column Events
+    // Real-Time Events
     state.socket.on('TASK_MOVED', (data) => {
       handleRemoteTaskMoved(data);
     });
@@ -257,7 +319,6 @@
 
       el.boardSelect.innerHTML = '';
       if (state.boards.length === 0) {
-        // Automatically create a starter board for new users
         await autoCreateStarterBoard();
         return;
       }
@@ -269,7 +330,6 @@
         el.boardSelect.appendChild(option);
       });
 
-      // Default to URL hash or first board
       const hashId = window.location.hash.replace('#', '');
       const selectedId = state.boards.find((b) => b.id === hashId) ? hashId : state.boards[0].id;
       el.boardSelect.value = selectedId;
@@ -288,7 +348,6 @@
       });
       if (res.ok) {
         const newBoard = await res.json();
-        // Add sample starter tasks
         const boardDetailRes = await apiFetch(`/api/boards/${newBoard.id}`);
         const boardData = await boardDetailRes.json();
         if (boardData && boardData.columns && boardData.columns.length > 0) {
@@ -335,10 +394,23 @@
       }
       state.boardData = await res.json();
       el.boardTitle.textContent = state.boardData.board_title;
+      updateBoardStats();
       renderColumns();
     } catch (err) {
       console.error('selectBoard error:', err);
     }
+  }
+
+  function updateBoardStats() {
+    if (!state.boardData) return;
+    const colCount = state.boardData.columns ? state.boardData.columns.length : 0;
+    let taskCount = 0;
+    if (state.boardData.columns) {
+      state.boardData.columns.forEach((c) => {
+        taskCount += c.tasks ? c.tasks.length : 0;
+      });
+    }
+    el.boardStats.textContent = `${taskCount} cards · ${colCount} columns`;
   }
 
   // Render Columns and Cards
@@ -353,6 +425,8 @@
       const colEl = createColumnElement(column);
       el.columnsContainer.appendChild(colEl);
     });
+
+    updateBoardStats();
   }
 
   function createColumnElement(column) {
@@ -367,25 +441,57 @@
     const titleGroup = document.createElement('div');
     titleGroup.className = 'column-title-group';
 
+    // Status dot with themed color
+    const dot = document.createElement('span');
+    dot.className = 'column-status-dot';
+    dot.style.backgroundColor = getColumnColor(column.title);
+
     const title = document.createElement('span');
     title.className = 'column-title';
     title.textContent = column.title;
 
+    const visibleTasks = getFilteredTasks(column.tasks || []);
     const count = document.createElement('span');
     count.className = 'task-count';
-    count.textContent = column.tasks ? column.tasks.length : 0;
+    count.textContent = visibleTasks.length;
 
+    titleGroup.appendChild(dot);
     titleGroup.appendChild(title);
     titleGroup.appendChild(count);
 
+    // Actions
+    const actions = document.createElement('div');
+    actions.className = 'column-header-actions';
+
+    const addBtn = document.createElement('button');
+    addBtn.className = 'btn-header-action';
+    addBtn.innerHTML = `
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+        <line x1="12" y1="5" x2="12" y2="19" />
+        <line x1="5" y1="12" x2="19" y2="12" />
+      </svg>
+    `;
+    addBtn.title = 'Add card to column';
+    addBtn.addEventListener('click', () => {
+      const footer = colEl.querySelector('.column-footer');
+      if (footer) showQuickTaskInput(column.id, footer);
+    });
+
     const deleteBtn = document.createElement('button');
-    deleteBtn.className = 'btn-delete-col';
-    deleteBtn.innerHTML = '&times;';
+    deleteBtn.className = 'btn-header-action delete';
+    deleteBtn.innerHTML = `
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="3 6 5 6 21 6" />
+        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+      </svg>
+    `;
     deleteBtn.title = 'Delete Column';
     deleteBtn.addEventListener('click', () => deleteColumn(column.id));
 
+    actions.appendChild(addBtn);
+    actions.appendChild(deleteBtn);
     header.appendChild(titleGroup);
-    header.appendChild(deleteBtn);
+    header.appendChild(actions);
     colEl.appendChild(header);
 
     // Task List Container
@@ -412,10 +518,9 @@
     });
 
     // Render Cards inside column
-    const tasks = column.tasks || [];
-    tasks.sort((a, b) => Number(a.position) - Number(b.position));
+    visibleTasks.sort((a, b) => Number(a.position) - Number(b.position));
 
-    tasks.forEach((task) => {
+    visibleTasks.forEach((task) => {
       const card = createTaskCard(task, column.id);
       tasksList.appendChild(card);
     });
@@ -428,13 +533,28 @@
 
     const btnAddTask = document.createElement('button');
     btnAddTask.className = 'btn-add-task';
-    btnAddTask.innerHTML = '<span>+</span> Add card';
+    btnAddTask.innerHTML = `
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <line x1="12" y1="5" x2="12" y2="19" />
+        <line x1="5" y1="12" x2="19" y2="12" />
+      </svg>
+      <span>Add card</span>
+    `;
     btnAddTask.addEventListener('click', () => showQuickTaskInput(column.id, footer));
 
     footer.appendChild(btnAddTask);
     colEl.appendChild(footer);
 
     return colEl;
+  }
+
+  function getFilteredTasks(tasks) {
+    if (!state.filterQuery) return tasks;
+    const q = state.filterQuery.toLowerCase();
+    return tasks.filter((t) =>
+      (t.title && t.title.toLowerCase().includes(q)) ||
+      (t.description && t.description.toLowerCase().includes(q))
+    );
   }
 
   function createTaskCard(task, columnId) {
@@ -458,10 +578,31 @@
       card.appendChild(descEl);
     }
 
-    const metaEl = document.createElement('div');
-    metaEl.className = 'task-meta';
-    metaEl.innerHTML = `<span class="task-ver-badge">v${task.version}</span>`;
-    card.appendChild(metaEl);
+    // Card Footer with OCC version and timestamp
+    const footer = document.createElement('div');
+    footer.className = 'task-card-footer';
+
+    const metaLeft = document.createElement('div');
+    metaLeft.className = 'task-meta-left';
+
+    const verBadge = document.createElement('span');
+    verBadge.className = 'task-ver-badge';
+    verBadge.textContent = `v${task.version}`;
+    metaLeft.appendChild(verBadge);
+
+    const timePill = document.createElement('span');
+    timePill.className = 'task-time-pill';
+    timePill.innerHTML = `
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10" />
+        <polyline points="12 6 12 12 16 14" />
+      </svg>
+      <span>${formatRelativeTime(task.updated_at || task.created_at)}</span>
+    `;
+    metaLeft.appendChild(timePill);
+
+    footer.appendChild(metaLeft);
+    card.appendChild(footer);
 
     // Click to Open Edit Modal
     card.addEventListener('click', (e) => {
@@ -481,7 +622,6 @@
     card.addEventListener('dragend', () => {
       card.classList.remove('dragging');
       document.querySelectorAll('.column').forEach((col) => col.classList.remove('drag-over'));
-      document.querySelectorAll('.task-card').forEach((c) => c.classList.remove('drag-over-card'));
     });
 
     return card;
@@ -496,22 +636,31 @@
 
     const input = document.createElement('textarea');
     input.className = 'quick-task-input';
-    input.placeholder = 'Enter a title for this card...';
+    input.placeholder = 'What needs to be done?';
     input.rows = 2;
 
     const actions = document.createElement('div');
     actions.className = 'quick-task-actions';
 
-    const btnSubmit = document.createElement('button');
-    btnSubmit.className = 'btn btn-primary btn-sm';
-    btnSubmit.textContent = 'Add Card';
+    const hint = document.createElement('span');
+    hint.className = 'quick-task-hint';
+    hint.textContent = '↵ to add · Esc';
+
+    const btnGroup = document.createElement('div');
+    btnGroup.className = 'quick-task-btns';
 
     const btnCancel = document.createElement('button');
     btnCancel.className = 'btn btn-secondary btn-sm';
     btnCancel.textContent = 'Cancel';
 
-    actions.appendChild(btnSubmit);
-    actions.appendChild(btnCancel);
+    const btnSubmit = document.createElement('button');
+    btnSubmit.className = 'btn btn-primary btn-sm';
+    btnSubmit.textContent = 'Add Card';
+
+    btnGroup.appendChild(btnCancel);
+    btnGroup.appendChild(btnSubmit);
+    actions.appendChild(hint);
+    actions.appendChild(btnGroup);
     wrapper.appendChild(input);
     wrapper.appendChild(actions);
     footer.appendChild(wrapper);
@@ -530,7 +679,6 @@
         if (!res.ok) throw new Error('Failed to create task');
         const task = await res.json();
 
-        // Optimistically add to state
         const col = state.boardData.columns.find((c) => c.id === columnId);
         if (col && !col.tasks.some((t) => t.id === task.id)) {
           col.tasks.push(task);
@@ -573,7 +721,6 @@
     const targetCol = state.boardData.columns.find((c) => c.id === targetColId);
     if (!targetCol) return;
 
-    // Calculate new position
     const targetCards = targetCol.tasks.filter((t) => t.id !== taskId);
     targetCards.sort((a, b) => Number(a.position) - Number(b.position));
 
@@ -583,27 +730,27 @@
       newPosition = Number(lastTask.position) + 1000;
     }
 
-    // Save previous state for rollback on conflict
     const previousColumnId = task.column_id;
     const previousPosition = task.position;
     const previousVersion = task.version;
 
-    // Optimistically update local state immediately for 0ms UI lag
+    // Optimistically update local state immediately
     sourceCol.tasks = sourceCol.tasks.filter((t) => t.id !== taskId);
     task.column_id = targetColId;
     task.position = newPosition;
     task.version = previousVersion + 1;
+    task.updated_at = new Date().toISOString();
     targetCol.tasks.push(task);
     renderColumns();
 
-    // Emit atomic OCC TASK_MOVED over WebSocket
+    // Emit atomic OCC TASK_MOVED
     if (state.socket && state.socket.connected) {
       state.socket.emit('TASK_MOVED', {
         boardId: state.currentBoardId,
         taskId: task.id,
         columnId: targetColId,
         position: newPosition,
-        version: previousVersion, // Must match DB current version
+        version: previousVersion,
       });
     }
   }
@@ -632,7 +779,7 @@
   }
 
   function handleTaskMoveRejected(data) {
-    showToast('Card position conflict detected. Synced with server.', 'warning');
+    showToast('Card updated by another collaborator. Synced with server.', 'warning');
     if (!state.boardData || !data.latestTask) return;
 
     const latest = data.latestTask;
@@ -659,6 +806,8 @@
         description: data.description,
         position: data.position,
         version: data.version,
+        created_at: data.created_at,
+        updated_at: data.updated_at,
       });
       renderColumns();
     }
@@ -674,6 +823,7 @@
         task.description = data.description;
         task.version = data.version;
         task.position = data.position;
+        task.updated_at = data.updated_at;
       }
     });
     renderColumns();
@@ -703,6 +853,12 @@
       showToast('Error deleting column', 'danger');
     }
   }
+
+  // Filter Cards Input Handler
+  el.filterCards.addEventListener('input', (e) => {
+    state.filterQuery = e.target.value.trim();
+    renderColumns();
+  });
 
   // Modals & Handlers
   function openAuthModal() {
@@ -755,7 +911,7 @@
 
       updateUserUI();
       closeAuthModal();
-      showToast(`Welcome, ${data.user.email}!`, 'success');
+      showToast(`Welcome back, ${data.user.email}!`, 'success');
 
       initSocket();
       await loadBoardsList();
@@ -766,7 +922,7 @@
 
   // 1-Click Instant Demo Login
   el.btnQuickDemoLogin.addEventListener('click', async () => {
-    const demoEmail = `guest_${Math.random().toString(36).substring(2, 7)}@demo.collab`;
+    const demoEmail = `guest_${Math.random().toString(36).substring(2, 7)}@collab.work`;
     const demoPassword = 'demopassword123';
 
     try {
@@ -799,7 +955,7 @@
     state.authMode = 'login';
     el.tabLogin.classList.add('active');
     el.tabRegister.classList.remove('active');
-    el.authModalTitle.textContent = 'Sign In to CollabBoard';
+    el.authModalTitle.textContent = 'Sign in to CollabBoard';
     el.btnAuthSubmit.textContent = 'Sign In';
   });
 
@@ -858,11 +1014,13 @@
   // Task Edit Modal
   function openTaskModal(task) {
     el.editTaskId.value = task.id;
+    el.taskDialogId.textContent = `TASK · v${task.version}`;
     el.editTaskTitle.value = task.title;
     el.editTaskDesc.value = task.description || '';
     el.editTaskMeta.innerHTML = `
-      <span>Version: ${task.version}</span>
-      <span>Last Modified: ${task.updated_at ? new Date(task.updated_at).toLocaleTimeString() : 'Just now'}</span>
+      <span>OCC Version: ${task.version}</span>
+      <span>Created: ${task.created_at ? new Date(task.created_at).toLocaleDateString() : 'N/A'}</span>
+      <span>Updated: ${task.updated_at ? formatRelativeTime(task.updated_at) : 'N/A'}</span>
     `;
     el.modalTask.classList.remove('hidden');
     el.editTaskTitle.focus();
@@ -897,6 +1055,7 @@
           task.title = updated.title;
           task.description = updated.description;
           task.version = updated.version;
+          task.updated_at = updated.updated_at;
         }
       });
       renderColumns();

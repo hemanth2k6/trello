@@ -3,114 +3,202 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CollabBoard - Real-Time Collaborative Task Board</title>
+  <title>CollabBoard · Real-Time Collaborative Workspace</title>
   <link rel="stylesheet" href="/style.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 </head>
 <body>
   <div id="app">
-    <!-- Navigation Bar -->
+    <!-- Top Navigation Bar -->
     <header class="navbar">
       <div class="nav-left">
-        <div class="logo">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-            <rect x="3" y="3" width="18" height="18" rx="3" ry="3"></rect>
-            <rect x="7" y="7" width="3" height="9" rx="1"></rect>
-            <rect x="14" y="7" width="3" height="5" rx="1"></rect>
-          </svg>
-          <span>CollabBoard</span>
+        <div class="brand">
+          <div class="brand-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="4" />
+              <path d="M8 7v10M13 7v6M18 7v3" />
+            </svg>
+          </div>
+          <span class="brand-name">CollabBoard</span>
+          <span class="brand-badge">PRO</span>
         </div>
-        <div class="board-selector-wrapper">
-          <select id="board-select" aria-label="Select Board">
+
+        <div class="nav-divider"></div>
+
+        <div class="board-selector-container">
+          <svg class="board-select-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M4 6h16M4 12h16M4 18h10" />
+          </svg>
+          <select id="board-select" aria-label="Select Workspace Board">
             <option value="" disabled selected>Loading boards...</option>
           </select>
-          <button id="btn-new-board" class="btn btn-primary btn-sm">+ New Board</button>
+          <svg class="select-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+          <button id="btn-new-board" class="btn-icon" title="Create New Board">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+          </button>
         </div>
       </div>
 
       <div class="nav-right">
-        <!-- Live Presence Indicator -->
-        <div id="presence-badge" class="presence-badge" title="Active users viewing this board">
-          <span class="presence-icon">👥</span>
-          <span id="presence-count">1 online</span>
+        <!-- Live Active Collaborators Stack -->
+        <div class="presence-widget" id="presence-widget" title="Live collaborators on this board">
+          <div class="avatar-stack" id="avatar-stack">
+            <!-- Dynamic avatar chips inserted here -->
+          </div>
+          <span class="presence-label" id="presence-count">1 online</span>
         </div>
 
-        <!-- Connection Status -->
-        <div id="connection-status" class="status-badge connecting">
+        <!-- Connection State Indicator -->
+        <div id="connection-status" class="status-pill connecting">
           <span class="status-dot"></span>
-          <span class="status-text">Connecting...</span>
+          <span class="status-text">Connecting</span>
         </div>
 
-        <!-- User Profile -->
-        <div class="user-profile-widget">
-          <span id="user-display" class="user-email">Guest</span>
-          <button id="btn-auth-toggle" class="btn btn-secondary btn-sm">Sign In</button>
+        <div class="nav-divider"></div>
+
+        <!-- User Profile Pill -->
+        <div class="user-chip" id="user-chip">
+          <div class="user-avatar" id="user-avatar">U</div>
+          <span class="user-email-text" id="user-display">Guest</span>
+          <button id="btn-auth-toggle" class="btn-ghost-sm">Sign In</button>
         </div>
       </div>
     </header>
 
-    <!-- Main Board Canvas -->
-    <main class="board-container">
-      <div class="board-header">
-        <h1 id="board-title">Select or Create a Board</h1>
-        <div class="board-actions">
-          <button id="btn-invite-member" class="btn btn-secondary">👥 Share Board</button>
-          <button id="btn-add-column" class="btn btn-primary">+ Add Column</button>
+    <!-- Sub-Navbar / Board Header -->
+    <div class="board-subnav">
+      <div class="board-subnav-left">
+        <div class="board-title-wrapper">
+          <h1 id="board-title">Select or Create a Board</h1>
+          <span class="board-badge-pill" id="board-stats">Live Sync</span>
         </div>
       </div>
 
+      <div class="board-subnav-right">
+        <!-- Live Filter Bar -->
+        <div class="filter-box">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <input type="text" id="filter-cards" placeholder="Filter cards by title...">
+        </div>
+
+        <button id="btn-invite-member" class="btn btn-secondary">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+            <circle cx="8.5" cy="7" r="4" />
+            <line x1="20" y1="8" x2="20" y2="14" />
+            <line x1="23" y1="11" x2="17" y2="11" />
+          </svg>
+          <span>Share</span>
+        </button>
+
+        <button id="btn-add-column" class="btn btn-primary">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+          <span>New Column</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Main Kanban Board Canvas -->
+    <main class="board-container">
       <div id="columns-container" class="columns-canvas">
-        <!-- Columns will be dynamically rendered here -->
+        <!-- Columns dynamically injected here -->
       </div>
     </main>
   </div>
 
   <!-- Authentication Modal -->
   <div id="modal-auth" class="modal-overlay hidden">
-    <div class="modal auth-modal">
+    <div class="modal auth-dialog">
       <div class="modal-header">
-        <h3 id="auth-modal-title">Sign In to CollabBoard</h3>
+        <div class="modal-title-group">
+          <div class="modal-icon-badge">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+              <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3" />
+            </svg>
+          </div>
+          <div>
+            <h3 id="auth-modal-title">Sign in to CollabBoard</h3>
+            <p class="modal-subtitle">Access your real-time collaborative workspace</p>
+          </div>
+        </div>
         <button class="modal-close" id="close-modal-auth">&times;</button>
       </div>
-      <div class="auth-quick-login">
-        <button type="button" id="btn-quick-demo-login" class="btn btn-primary btn-block">
-          ⚡ 1-Click Instant Demo Login
-        </button>
-        <div class="auth-divider"><span>or with email</span></div>
+
+      <div class="modal-body">
+        <div class="quick-auth-section">
+          <button type="button" id="btn-quick-demo-login" class="btn-demo-glow">
+            <span class="sparkle-icon">⚡</span>
+            <span>1-Click Instant Demo Login</span>
+            <span class="btn-hint">No password needed</span>
+          </button>
+          <div class="or-separator"><span>or continue with email</span></div>
+        </div>
+
+        <form id="form-auth">
+          <div class="segmented-control">
+            <button type="button" class="segment active" id="tab-login">Sign In</button>
+            <button type="button" class="segment" id="tab-register">Create Account</button>
+          </div>
+
+          <div class="form-group">
+            <label for="auth-email">Work or Personal Email</label>
+            <div class="input-with-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+                <polyline points="22,6 12,13 2,6" />
+              </svg>
+              <input type="email" id="auth-email" placeholder="name@company.com" required>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="auth-password">Password</label>
+            <div class="input-with-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+              </svg>
+              <input type="password" id="auth-password" placeholder="••••••••" minlength="6" required>
+            </div>
+          </div>
+
+          <div class="modal-footer-actions">
+            <button type="submit" id="btn-auth-submit" class="btn btn-primary btn-block">Sign In</button>
+          </div>
+        </form>
       </div>
-      <form id="form-auth">
-        <div class="auth-tabs">
-          <button type="button" class="auth-tab active" id="tab-login">Sign In</button>
-          <button type="button" class="auth-tab" id="tab-register">Create Account</button>
-        </div>
-        <div class="form-group">
-          <label for="auth-email">Email Address</label>
-          <input type="email" id="auth-email" placeholder="you@example.com" required>
-        </div>
-        <div class="form-group">
-          <label for="auth-password">Password</label>
-          <input type="password" id="auth-password" placeholder="At least 6 characters" minlength="6" required>
-        </div>
-        <div class="modal-actions">
-          <button type="submit" id="btn-auth-submit" class="btn btn-primary btn-block">Sign In</button>
-        </div>
-      </form>
     </div>
   </div>
 
   <!-- Create Board Modal -->
   <div id="modal-board" class="modal-overlay hidden">
-    <div class="modal">
+    <div class="modal compact-dialog">
       <div class="modal-header">
-        <h3>Create New Board</h3>
+        <div class="modal-title-group">
+          <h3 id="board-modal-title">Create New Board</h3>
+          <p class="modal-subtitle">Organize tasks and track progress with your team</p>
+        </div>
         <button class="modal-close" id="close-modal-board">&times;</button>
       </div>
       <form id="form-create-board">
-        <div class="form-group">
-          <label for="board-title-input">Board Title</label>
-          <input type="text" id="board-title-input" placeholder="e.g. Product Roadmap" required autofocus>
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="board-title-input">Board Name</label>
+            <input type="text" id="board-title-input" placeholder="e.g. Q4 Sprint, Product Launch, Roadmap..." required autofocus>
+          </div>
         </div>
         <div class="modal-actions">
           <button type="button" class="btn btn-secondary" id="cancel-board-btn">Cancel</button>
@@ -120,21 +208,26 @@
     </div>
   </div>
 
-  <!-- Share Board / Invite Member Modal -->
+  <!-- Share Board / Invite Modal -->
   <div id="modal-invite" class="modal-overlay hidden">
-    <div class="modal">
+    <div class="modal compact-dialog">
       <div class="modal-header">
-        <h3>Invite Collaborator to Board</h3>
+        <div class="modal-title-group">
+          <h3>Share Board with Teammates</h3>
+          <p class="modal-subtitle">Grant collaborative access to this board</p>
+        </div>
         <button class="modal-close" id="close-modal-invite">&times;</button>
       </div>
       <form id="form-invite-member">
-        <div class="form-group">
-          <label for="invite-email">Collaborator Email</label>
-          <input type="email" id="invite-email" placeholder="colleague@example.com" required>
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="invite-email">Teammate Email Address</label>
+            <input type="email" id="invite-email" placeholder="colleague@domain.com" required>
+          </div>
         </div>
         <div class="modal-actions">
           <button type="button" class="btn btn-secondary" id="cancel-invite-btn">Cancel</button>
-          <button type="submit" class="btn btn-primary">Add Member</button>
+          <button type="submit" class="btn btn-primary">Grant Access</button>
         </div>
       </form>
     </div>
@@ -142,26 +235,37 @@
 
   <!-- Task Detail / Edit Modal -->
   <div id="modal-task" class="modal-overlay hidden">
-    <div class="modal">
+    <div class="modal task-dialog">
       <div class="modal-header">
-        <h3>Task Details</h3>
+        <div class="modal-title-group">
+          <div class="card-id-chip" id="task-dialog-id">TASK</div>
+          <p class="modal-subtitle">Card properties & history</p>
+        </div>
         <button class="modal-close" id="close-modal-task">&times;</button>
       </div>
       <form id="form-edit-task">
-        <input type="hidden" id="edit-task-id">
-        <div class="form-group">
-          <label for="edit-task-title">Title</label>
-          <input type="text" id="edit-task-title" required>
-        </div>
-        <div class="form-group">
-          <label for="edit-task-desc">Description</label>
-          <textarea id="edit-task-desc" rows="4" placeholder="Add a detailed description..."></textarea>
-        </div>
-        <div class="task-meta-info" id="edit-task-meta">
-          <!-- Version and timestamps -->
+        <div class="modal-body">
+          <input type="hidden" id="edit-task-id">
+          <div class="form-group">
+            <label for="edit-task-title">Title</label>
+            <input type="text" id="edit-task-title" placeholder="What needs to be done?" required>
+          </div>
+          <div class="form-group">
+            <label for="edit-task-desc">Description</label>
+            <textarea id="edit-task-desc" rows="4" placeholder="Add more detailed context, acceptance criteria, or notes..."></textarea>
+          </div>
+          <div class="task-info-grid" id="edit-task-meta">
+            <!-- OCC Version and timestamp meta tags inserted here -->
+          </div>
         </div>
         <div class="modal-actions space-between">
-          <button type="button" class="btn btn-danger" id="btn-delete-task">Delete Task</button>
+          <button type="button" class="btn btn-danger-ghost" id="btn-delete-task">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="3 6 5 6 21 6" />
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+            </svg>
+            <span>Delete</span>
+          </button>
           <div class="right-buttons">
             <button type="button" class="btn btn-secondary" id="cancel-task-btn">Cancel</button>
             <button type="submit" class="btn btn-primary">Save Changes</button>
@@ -171,7 +275,7 @@
     </div>
   </div>
 
-  <!-- Toast Container -->
+  <!-- Toast Notification Container -->
   <div id="toast-container" class="toast-container"></div>
 
   <!-- Scripts -->
