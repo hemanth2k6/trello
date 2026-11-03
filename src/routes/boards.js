@@ -5,20 +5,37 @@ const { authenticateToken, optionalAuth } = require('../middleware/auth');
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-// GET /api/boards - List all boards
-router.get('/', async (req, res) => {
+// GET /api/boards - List boards (user's boards if authenticated, all if unauthenticated)
+router.get('/', optionalAuth, async (req, res) => {
   try {
-    const query = `
-      SELECT b.id, b.title, b.created_at,
-             COUNT(DISTINCT c.id)::int AS column_count,
-             COUNT(DISTINCT t.id)::int AS task_count
-      FROM boards b
-      LEFT JOIN columns c ON c.board_id = b.id
-      LEFT JOIN tasks t ON t.column_id = c.id
-      GROUP BY b.id
-      ORDER BY b.created_at DESC;
-    `;
-    const result = await db.query(query);
+    let query;
+    let params = [];
+    if (req.user && req.user.id) {
+      query = `
+        SELECT b.id, b.title, b.created_at,
+               COUNT(DISTINCT c.id)::int AS column_count,
+               COUNT(DISTINCT t.id)::int AS task_count
+        FROM boards b
+        JOIN board_members bm ON bm.board_id = b.id AND bm.user_id = $1
+        LEFT JOIN columns c ON c.board_id = b.id
+        LEFT JOIN tasks t ON t.column_id = c.id
+        GROUP BY b.id
+        ORDER BY b.created_at DESC;
+      `;
+      params = [req.user.id];
+    } else {
+      query = `
+        SELECT b.id, b.title, b.created_at,
+               COUNT(DISTINCT c.id)::int AS column_count,
+               COUNT(DISTINCT t.id)::int AS task_count
+        FROM boards b
+        LEFT JOIN columns c ON c.board_id = b.id
+        LEFT JOIN tasks t ON t.column_id = c.id
+        GROUP BY b.id
+        ORDER BY b.created_at DESC;
+      `;
+    }
+    const result = await db.query(query, params);
     return res.json(result.rows);
   } catch (err) {
     console.error('Error fetching boards:', err);

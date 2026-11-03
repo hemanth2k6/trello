@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Real-Time Collaborative Task Board</title>
+  <title>CollabBoard - Real-Time Collaborative Task Board</title>
   <link rel="stylesheet" href="/style.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -29,10 +29,24 @@
           <button id="btn-new-board" class="btn btn-primary btn-sm">+ New Board</button>
         </div>
       </div>
+
       <div class="nav-right">
+        <!-- Live Presence Indicator -->
+        <div id="presence-badge" class="presence-badge" title="Active users viewing this board">
+          <span class="presence-icon">👥</span>
+          <span id="presence-count">1 online</span>
+        </div>
+
+        <!-- Connection Status -->
         <div id="connection-status" class="status-badge connecting">
           <span class="status-dot"></span>
           <span class="status-text">Connecting...</span>
+        </div>
+
+        <!-- User Profile -->
+        <div class="user-profile-widget">
+          <span id="user-display" class="user-email">Guest</span>
+          <button id="btn-auth-toggle" class="btn btn-secondary btn-sm">Sign In</button>
         </div>
       </div>
     </header>
@@ -42,7 +56,8 @@
       <div class="board-header">
         <h1 id="board-title">Select or Create a Board</h1>
         <div class="board-actions">
-          <button id="btn-add-column" class="btn btn-secondary">+ Add Column</button>
+          <button id="btn-invite-member" class="btn btn-secondary">👥 Share Board</button>
+          <button id="btn-add-column" class="btn btn-primary">+ Add Column</button>
         </div>
       </div>
 
@@ -50,6 +65,39 @@
         <!-- Columns will be dynamically rendered here -->
       </div>
     </main>
+  </div>
+
+  <!-- Authentication Modal -->
+  <div id="modal-auth" class="modal-overlay hidden">
+    <div class="modal auth-modal">
+      <div class="modal-header">
+        <h3 id="auth-modal-title">Sign In to CollabBoard</h3>
+        <button class="modal-close" id="close-modal-auth">&times;</button>
+      </div>
+      <div class="auth-quick-login">
+        <button type="button" id="btn-quick-demo-login" class="btn btn-primary btn-block">
+          ⚡ 1-Click Instant Demo Login
+        </button>
+        <div class="auth-divider"><span>or with email</span></div>
+      </div>
+      <form id="form-auth">
+        <div class="auth-tabs">
+          <button type="button" class="auth-tab active" id="tab-login">Sign In</button>
+          <button type="button" class="auth-tab" id="tab-register">Create Account</button>
+        </div>
+        <div class="form-group">
+          <label for="auth-email">Email Address</label>
+          <input type="email" id="auth-email" placeholder="you@example.com" required>
+        </div>
+        <div class="form-group">
+          <label for="auth-password">Password</label>
+          <input type="password" id="auth-password" placeholder="At least 6 characters" minlength="6" required>
+        </div>
+        <div class="modal-actions">
+          <button type="submit" id="btn-auth-submit" class="btn btn-primary btn-block">Sign In</button>
+        </div>
+      </form>
+    </div>
   </div>
 
   <!-- Create Board Modal -->
@@ -67,6 +115,26 @@
         <div class="modal-actions">
           <button type="button" class="btn btn-secondary" id="cancel-board-btn">Cancel</button>
           <button type="submit" class="btn btn-primary">Create Board</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Share Board / Invite Member Modal -->
+  <div id="modal-invite" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Invite Collaborator to Board</h3>
+        <button class="modal-close" id="close-modal-invite">&times;</button>
+      </div>
+      <form id="form-invite-member">
+        <div class="form-group">
+          <label for="invite-email">Collaborator Email</label>
+          <input type="email" id="invite-email" placeholder="colleague@example.com" required>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" id="cancel-invite-btn">Cancel</button>
+          <button type="submit" class="btn btn-primary">Add Member</button>
         </div>
       </form>
     </div>
