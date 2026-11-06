@@ -4,8 +4,15 @@ const jwt = require('jsonwebtoken');
 const { JWT_SECRET } = require('../middleware/auth');
 const { pool } = require('../config/db');
 const { pubClient, subClient, redisClient } = require('../config/redis');
-const { persistTaskMove, getTaskById, recordBoardEvent } = require('./persistence');
+const { persistTaskMove, getTaskById } = require('./persistence');
+const { asyncEventWriter } = require('./asyncWriter');
 
+/**
+ * Initializes and configures the WebSocket server with Redis Pub/Sub adapter.
+ *
+ * @param {import('http').Server} server - Native HTTP server instance
+ * @returns {Server} Configured Socket.io server instance
+ */
 function setupSocket(server) {
   const io = new Server(server, {
     cors: {
@@ -14,9 +21,19 @@ function setupSocket(server) {
     },
   });
 
+  // ---------------------------------------------------------------------------
+  // REDIS PUB/SUB ADAPTER: The multi-server broadcast backbone
+  // ---------------------------------------------------------------------------
+  // When io.to(room).emit() is called on this server instance (e.g. Server 1):
+  // 1. Redis adapter serializes the event packet.
+  // 2. pubClient publishes the packet to Redis channel: "socket.io#/<room>#"
+  // 3. Redis fans out the packet to all subscribed server replicas (e.g. Server 2).
+  // 4. subClient on Server 2 receives the packet and emits it to local sockets in that room.
   io.adapter(createAdapter(pubClient, subClient));
 
-  // Connection middleware to validate JWT token
+  // ---------------------------------------------------------------------------
+  // Connection Authentication Middleware
+  // ---------------------------------------------------------------------------
   io.use((socket, next) => {
     const token =
       socket.handshake.auth?.token ||
@@ -37,10 +54,14 @@ function setupSocket(server) {
     }
   });
 
+  // ---------------------------------------------------------------------------
+  // Socket Connection Lifecycle & Events
+  // ---------------------------------------------------------------------------
   io.on('connection', (socket) => {
     socket.boards = new Set();
+    const serverInstance = process.env.INSTANCE_ID || 'server-node-1';
 
-    // Client joins a specific board room after verifying membership
+    // Client requests to join a board room
     socket.on('join_board', async (boardId) => {
       try {
         if (!boardId) return;
@@ -60,7 +81,7 @@ function setupSocket(server) {
         socket.join(`board:${boardId}`);
         socket.boards.add(boardId);
 
-        // Feature 3: Track presence in Redis sorted set
+        // Track presence across cluster in Redis sorted set
         const presenceKey = `presence:${boardId}`;
         let onlineUsers = [];
         if (redisClient.isOpen) {
@@ -69,11 +90,11 @@ function setupSocket(server) {
           onlineUsers = await redisClient.zRange(presenceKey, 0, -1);
         }
 
-        // Emit current online user list to joining socket only
+        // Emit current online users to joining socket
         socket.emit('online_users', { boardId, users: onlineUsers });
         socket.emit('presence_current', { boardId, users: onlineUsers });
 
-        // Deliver presence_update of other already-online users to this joining socket
+        // Deliver presence of existing members
         for (const existingUserId of onlineUsers) {
           if (existingUserId !== userId) {
             socket.emit('presence_update', {
@@ -85,7 +106,7 @@ function setupSocket(server) {
           }
         }
 
-        // Broadcast presence_update to the room
+        // Broadcast join across cluster via Redis Pub/Sub adapter
         io.to(`board:${boardId}`).emit('presence_update', {
           boardId,
           users: onlineUsers,
@@ -98,7 +119,7 @@ function setupSocket(server) {
       }
     });
 
-    // Client leaves a specific board room
+    // Client explicitly leaves a board room
     socket.on('leave_board', async (boardId) => {
       try {
         if (!boardId) return;
@@ -112,6 +133,7 @@ function setupSocket(server) {
           const presenceKey = `presence:${boardId}`;
           await redisClient.zRem(presenceKey, userId);
           const remainingUsers = await redisClient.zRange(presenceKey, 0, -1);
+
           io.to(`board:${boardId}`).emit('presence_update', {
             boardId,
             users: remainingUsers,
@@ -124,7 +146,7 @@ function setupSocket(server) {
       }
     });
 
-    // Heartbeat event from client every 30s to update timestamp in Redis sorted set
+    // Client heartbeat ping every 25s-30s to maintain presence
     socket.on('heartbeat', async (data) => {
       try {
         const userId = socket.user?.id;
@@ -145,7 +167,7 @@ function setupSocket(server) {
       }
     });
 
-    // Handle disconnect to remove user from presence
+    // Client disconnecting (tab closed or network dropped)
     socket.on('disconnecting', async () => {
       try {
         const userId = socket.user?.id;
@@ -158,6 +180,7 @@ function setupSocket(server) {
             const presenceKey = `presence:${boardId}`;
             await redisClient.zRem(presenceKey, userId);
             const remainingUsers = await redisClient.zRange(presenceKey, 0, -1);
+
             socket.to(room).emit('presence_update', {
               boardId,
               users: remainingUsers,
@@ -171,7 +194,9 @@ function setupSocket(server) {
       }
     });
 
-    // Handle task move event with optimistic concurrency
+    // -------------------------------------------------------------------------
+    // CORE DISTRIBUTED EVENT: TASK_MOVED
+    // -------------------------------------------------------------------------
     socket.on('TASK_MOVED', async (data) => {
       try {
         const {
@@ -189,7 +214,7 @@ function setupSocket(server) {
         const pos = position !== undefined ? position : targetPosition;
         const ver = version !== undefined ? version : clientVersion;
 
-        // Persist the move using optimistic concurrency check
+        // 1. Atomic Optimistic Concurrency Control (OCC) check
         const updatedTask = await persistTaskMove({
           taskId,
           columnId: colId,
@@ -197,12 +222,14 @@ function setupSocket(server) {
           version: ver,
         });
 
-        // If version check failed (rowCount === 0), reject ONLY to originating socket
+        // 2. Conflict Handling: Version mismatch occurs when another user moved it first
         if (!updatedTask) {
           const latestTask = await getTaskById(taskId);
+          // Target sender only: snap back optimistic UI with authoritative state
           socket.emit('TASK_MOVE_REJECTED', {
             taskId,
-            message: 'Conflict: Task version mismatch',
+            reason: 'CONCURRENCY_CONFLICT',
+            message: 'Conflict: Task version mismatch. Another user moved this task first.',
             clientVersion: ver,
             latestTask,
           });
@@ -214,18 +241,22 @@ function setupSocket(server) {
           boardId,
           ...updatedTask,
           moved_by: movedBy,
+          originServer: serverInstance,
+          broadcastTimestamp: new Date().toISOString(),
         };
 
-        // Record in board_events table
-        await recordBoardEvent({
+        // 3. IMMEDIATE REAL-TIME BROADCAST: Zero wait on secondary database logging
+        // Emits to room via Redis Pub/Sub adapter to instantly update all peers
+        io.to(`board:${boardId}`).emit('TASK_MOVED', payload);
+
+        // 4. ASYNCHRONOUS WRITE-BEHIND: Offload audit logging to background queue
+        // Buffers events and micro-batches inserts to PostgreSQL (non-blocking)
+        asyncEventWriter.enqueue({
           boardId,
           eventType: 'TASK_MOVED',
           payload,
           actorUserId: movedBy,
         });
-
-        // Fire-and-forget broadcast to all clients in the board room
-        io.to(`board:${boardId}`).emit('TASK_MOVED', payload);
       } catch (err) {
         console.error('Error handling TASK_MOVED:', err);
         socket.emit('TASK_MOVE_REJECTED', {
