@@ -1,11 +1,13 @@
 {
   "name": "trello-realtime-board",
   "version": "1.0.0",
-  "description": "Production-grade Real-Time Collaborative Task Board (Trello Clone)",
+  "description": "Production-grade Real-Time Collaborative Task Board (Trello Clone Backend)",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "docker:up": "docker compose up --build",
+    "docker:down": "docker compose down -v"
   },
   "dependencies": {
     "@socket.io/redis-adapter": "^8.3.0",
