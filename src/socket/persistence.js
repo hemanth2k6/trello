@@ -3,14 +3,14 @@ const { pool } = require('../config/db');
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /**
- * Persists a task move with optimistic concurrency control.
+ * Persists a task position/column change using Optimistic Concurrency Control (OCC).
  *
  * Transaction flow:
  * 1. Validate UUIDs
- * 2. BEGIN
+ * 2. BEGIN database transaction
  * 3. UPDATE tasks SET column_id = ..., position = ..., version = version + 1
  *    WHERE id = $3 AND version = $4
- * 4. If rowCount === 0: ROLLBACK and return null (optimistic lock failure)
+ * 4. If rowCount === 0: ROLLBACK and return null (indicates another user mutated the task first)
  * 5. Otherwise: COMMIT and return updated task row
  */
 async function persistTaskMove({ taskId, columnId, position, version }) {
@@ -46,6 +46,7 @@ async function persistTaskMove({ taskId, columnId, position, version }) {
     ]);
 
     if (result.rowCount === 0) {
+      // Optimistic lock conflict: client version was stale
       await client.query('ROLLBACK');
       return null;
     }
@@ -56,7 +57,7 @@ async function persistTaskMove({ taskId, columnId, position, version }) {
     try {
       await client.query('ROLLBACK');
     } catch (rbErr) {
-      console.error('Error rolling back transaction:', rbErr);
+      console.error('Error rolling back OCC transaction:', rbErr);
     }
     throw err;
   } finally {
@@ -64,6 +65,9 @@ async function persistTaskMove({ taskId, columnId, position, version }) {
   }
 }
 
+/**
+ * Retrieves authoritative task state from PostgreSQL by taskId
+ */
 async function getTaskById(taskId) {
   if (!taskId || !UUID_REGEX.test(taskId)) {
     return null;
@@ -75,6 +79,10 @@ async function getTaskById(taskId) {
   return res.rows[0] || null;
 }
 
+/**
+ * Records an immutable event in the board_events log
+ * Provides the durable audit trail and reconnection delta-sync source
+ */
 async function recordBoardEvent({ boardId, eventType, payload, actorUserId }) {
   if (!boardId || !UUID_REGEX.test(boardId)) {
     return null;
